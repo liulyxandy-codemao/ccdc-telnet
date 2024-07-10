@@ -118,10 +118,16 @@ async fn handler(buf: &[u8], stream: &mut TcpStream) -> Result<String, bool> {
             34 => return Err(false), // 行模式
             36 => return Err(false), // 环境变量
             _ => {
-                if !(i >= 65 && i <= 90) && !(i >= 97 && i <= 122) && !(i >= 48 && i <= 57) && !(i == 13) && !(i == 10) {
+                if !(i >= 65 && i <= 90) && !(i >= 97 && i <= 122) && !(i >= 48 && i <= 57) && !(i == 13) && !(i == 10) && !(i == 0) {
                     return Err(false);
                 }
-                res.insert(res.len(), i as char);
+                if i == 0 {
+                    res.insert(res.len(), 10 as char);
+                }
+                else {
+                    res.insert(res.len(), i as char);
+                }
+                
             }
         }
     }
