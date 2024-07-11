@@ -53,8 +53,6 @@ async fn welcome_message(stream: &mut TcpStream){
     let welcome_message = b"\r
 Welcome to the verify server!\r
 You should enter your code after the determiner '~>'.\r
-You should NOT input characters other than letters and numbers.\r
-If you do, your input will be rejected.\r
 Due to some reasons, you could not edit your input.\r
 Press 'Ctrl+C' to quit.\r
 ";
@@ -66,22 +64,90 @@ async fn determiner(stream: &mut TcpStream){
     let _ = stream.write(determiner).await;
 }
 
-async fn check(answer: String, stream: &mut TcpStream, addr: SocketAddr) -> Result<(), ()> {
-    if answer == String::from("8AE4F85617F021F5C15CF029656E063BB700E7A3") {
-        let random_number = rand::random::<u32>();
-        fs::write("codes.txt", 
-            format!("{}\n{}", String::from_utf8(fs::read("codes.txt").unwrap()).unwrap(), random_number)
+use lettre::{
+    transport::smtp::{
+        authentication::{Credentials, Mechanism}, response::Response, PoolConfig
+    },
+    Message, SmtpTransport, Transport,
+};
+
+fn send(to: &str) -> Result<Response, lettre::transport::smtp::Error> {
+    let email = Message::builder()
+        .from("CCDC 24 <crypto_ccdc24@cocotais.cn>".parse().unwrap())
+        .to(to.parse().unwrap())
+        .subject("QQ Group Invitation")
+        .body(String::from("Congratulation! You have passed the whole verification!\nJoin our QQ group: 970907767 with your email address!"))
+        .unwrap();
+
+    // Create TLS transport on port 587 with STARTTLS
+    let sender = SmtpTransport::starttls_relay("smtp.feishu.cn")
+        .unwrap()
+        // Add credentials for authentication
+        .credentials(Credentials::new(
+            "crypto_ccdc24@cocotais.cn".to_owned(),
+            "TVplAdCkHDmcaL6o".to_owned(),
+        ))
+        // Configure expected authentication mechanism
+        .authentication(vec![Mechanism::Plain])
+        // Connection pool settings
+        .pool_config(PoolConfig::new().max_size(20))
+        .build();
+
+    // Send the email via remote relay
+    sender.send(&email)
+}
+
+
+async fn mail_verify(stream: &mut TcpStream, addr: SocketAddr) {
+    let message = b"\r\nFor safety reasons, please enter your email address.\r\nEmail address: ";
+    let _ = stream.write(message).await;
+    let mut buffer = [0; 1024];
+    let mut mail = String::new();
+    loop {
+        let n = stream.read(&mut buffer).await.unwrap();
+        let resp = handler(&buffer[..n], stream).await;
+        
+        match resp {
+            Ok(res) => {
+                mail = if res == String::from("\n") || res == String::from("\r\n") || res == String::from("\r"){
+                    break;
+                } else {
+                    format!("{}{}", mail, res)
+                };
+            },
+            Err(true) => return ,
+            Err(false) => continue,
+        }
+        if n == 0 {
+            break;
+        }
+    }
+    let message = b"\r\nGreat!\r\n";
+    let _ = stream.write(message).await;
+    let mailresult = send(mail.as_str());
+    if let Ok(_) = mailresult {
+        fs::write("mail.txt", 
+            format!("{}\n{}", String::from_utf8(fs::read("mail.txt").unwrap()).unwrap(), mail)
         ).unwrap();
         fs::write("addr.txt", 
             format!("{}\n{}", String::from_utf8(fs::read("addr.txt").unwrap()).unwrap(), addr.ip().to_string())
         ).unwrap();
+        let message = b"An invitation mail was sent to your email.\r\nPlease check your inbox.\r\nConnection will close now.\r\n";
+        let _ = stream.write(message).await;
+    } else {
+        let message = b"\r\nUh-oh! We met some problem during sending the mail!\r\nPlease reconnect the server and try again.\r\n";
+        let _ = stream.write(message).await;
+    }
+}
+
+
+async fn check(answer: String, stream: &mut TcpStream, addr: SocketAddr) -> Result<(), ()> {
+    if answer == String::from("8AE4F85617F021F5C15CF029656E063BB700E7A3") {
         let success_message = format!("\r
 Wow! You have passed the verification!\r
-Please join our QQ group: 970907767\r
-with your unique code: {}\r
-to get your prize!\r
-Connection will close now.\r",random_number);
+");
         let _ = stream.write(success_message.as_bytes()).await;
+        mail_verify(stream, addr).await;
         Ok(())
     } else {
         let fail_message = b"\r
@@ -118,7 +184,7 @@ async fn handler(buf: &[u8], stream: &mut TcpStream) -> Result<String, bool> {
             34 => return Err(false), // 行模式
             36 => return Err(false), // 环境变量
             _ => {
-                if !(i >= 65 && i <= 90) && !(i >= 97 && i <= 122) && !(i >= 48 && i <= 57) && !(i == 13) && !(i == 10) && !(i == 0) {
+                if !(i >= 32 && i <= 126) && !(i == 13) && !(i == 10) && !(i == 0)  {
                     return Err(false);
                 }
                 if i == 0 {
