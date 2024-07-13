@@ -218,12 +218,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut ans = String::new();
             welcome_message(&mut stream).await;
             determiner(&mut stream).await;
+            let mut need_write = false;
+            let mut wrote = false;
             loop {
                 let n = stream.read(&mut buffer).await.unwrap();
                 let resp = handler(&buffer[..n], &mut stream).await;
-                
+                if need_write && !wrote {
+                    fs::write("visit.txt", 
+                        format!("{}\n{}", String::from_utf8(fs::read("visit.txt").unwrap()).unwrap(), addr.ip().to_string())
+                    ).unwrap();
+                    wrote = true;
+                }
                 match resp {
                     Ok(res) => {
+                        need_write = true;
                         ans = if res == String::from("\n") || res == String::from("\r\n") || res == String::from("\r"){
                             match check(ans, &mut stream, addr).await {
                                 Ok(()) => break,
@@ -236,7 +244,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         };
                     },
                     Err(true) => break,
-                    Err(false) => continue,
+                    Err(false) => {
+                        need_write = true;
+                        continue
+                    },
                 }
                 if n == 0 {
                     break;
