@@ -201,10 +201,18 @@ async fn handler(buf: &[u8], stream: &mut TcpStream) -> Result<String, bool> {
     Ok(res)
 }
 
+async fn iv_check(stream: &mut TcpStream){
+    let unknown_message = b"\r
+Verify your SM4 offset(IV): ";
+    let _ = stream.write(unknown_message).await;
+}
+
+
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let listener = TcpListener::bind("0.0.0.0:4567").await?;
-    println!("Server listening on port 4567");
+    let listener = TcpListener::bind("0.0.0.0:24680").await?;
+    println!("Server listening on port 24680");
     while let Ok(stream) = listener.accept().await {
         tokio::task::spawn(async move {
             let (mut stream, addr) = stream;
@@ -217,12 +225,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut buffer = [0; 1024];
             let mut ans = String::new();
             welcome_message(&mut stream).await;
-            determiner(&mut stream).await;
             let mut need_write = false;
             let mut wrote = false;
+            let mut iv_buf = [0; 1024];
+            let mut iv = String::new();
+            iv_check(&mut stream).await;
             loop {
-                let n = stream.read(&mut buffer).await.unwrap();
-                let resp = handler(&buffer[..n], &mut stream).await;
+                let n = stream.read(&mut iv_buf).await.unwrap();
+                let resp = handler(&iv_buf[..n], &mut stream).await;
                 if need_write && !wrote {
                     fs::write("visit.txt", 
                         format!("{}\n{}", String::from_utf8(fs::read("visit.txt").unwrap()).unwrap(), addr.ip().to_string())
@@ -232,6 +242,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match resp {
                     Ok(res) => {
                         need_write = true;
+                        iv = if res == String::from("\n") || res == String::from("\r\n") || res == String::from("\r"){
+                            match iv == String::from("e58cf97a7061ff5bdf9d008dbe970590") {
+                                true => break,
+                                false => {}
+                            };
+                            iv_check(&mut stream).await;
+                            String::new()
+                        } else {
+                            format!("{}{}", iv, res)
+                        };
+                    },
+                    Err(true) => return,
+                    Err(false) => {
+                        need_write = true;
+                        continue
+                    },
+                }
+                if n == 0 {
+                    break;
+                }
+            }
+            determiner(&mut stream).await;
+            
+            loop {
+                let n = stream.read(&mut buffer).await.unwrap();
+                let resp = handler(&buffer[..n], &mut stream).await;
+                
+                match resp {
+                    Ok(res) => {
+                        
                         ans = if res == String::from("\n") || res == String::from("\r\n") || res == String::from("\r"){
                             match check(ans, &mut stream, addr).await {
                                 Ok(()) => break,
